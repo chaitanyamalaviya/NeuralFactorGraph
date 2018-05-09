@@ -8,46 +8,32 @@ CoNLL-U Parser (https://github.com/EmilStenstrom/conllu) :  ```pip install conll
 
 PyTorch, version 0.3.0
 
-### Installing
+### Usage
 
-A step by step series of examples that tell you have to get a development env running
-
-Say what the step will be
+To run the baseline tagger for a language pair Danish/Swedish,
 
 ```
-Give the example
+python baselineTagger.py --gpu --langs sv/da --tgt_size 1000
 ```
 
-And repeat
+To run the Neural Factor Graph Model, 
 
 ```
-until finished
-```
-
-End with an example of getting some data out of the system or using it for a little demo
-
-## Running the tests
-
-Explain how to run the automated tests for this system
-
-### Break down into end to end tests
-
-Explain what these tests test and why
+python traincrf.py --gpu --langs sv/da --tgt_size 1000
 
 ```
-Give an example
-```
 
-### And coding style tests
+You can run unit tests for belief propagation with the argument `--unit_test`.
 
-Explain what these tests test and why
+The transitions and pairwise factors can be turned off with the `--no_transitions` and `--no_pairwise` arguments.
 
-```
-Give an example
-```
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
 
 ## Citation
+
+```
+TBA
+```
