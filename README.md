@@ -28,6 +28,10 @@ You can run unit tests for belief propagation with the argument `--unit_test`.
 The transitions and pairwise factors can be turned off with the `--no_transitions` and `--no_pairwise` arguments.
 
 
+### Data
+
+The Universal Dependency Treebanks can be obtained from https://lindat.mff.cuni.cz/repository/xmlui/handle/11234/1-2515.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
