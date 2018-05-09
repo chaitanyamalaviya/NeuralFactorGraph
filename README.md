@@ -23,10 +23,9 @@ python traincrf.py --gpu --langs da/sv --tgt_size 1000
 
 ```
 
-You can run unit tests for belief propagation with the argument `--unit_test`.
-
 The transitions and pairwise factors can be turned off with the `--no_transitions` and `--no_pairwise` arguments.
 
+You can run evaluation with the argument `--test` and visualize the learnt parameter matrices with the `--visualize` argument.
 
 ### Data
 
