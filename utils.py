@@ -46,7 +46,7 @@ def get_lang_code_dicts():
   bad_chars = ",''"
   rgx = re.compile('[%s]' % bad_chars)
 
-  with open("lang_codes.txt") as f:
+  with open("data/lang_codes.txt") as f:
     data = f.read()
     lines = data.split("\n")
     split_line = [line.split() for line in lines]
