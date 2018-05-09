@@ -13,13 +13,13 @@ PyTorch, version 0.3.0
 To run the baseline tagger for a language pair Danish/Swedish,
 
 ```
-python baselineTagger.py --gpu --langs sv/da --tgt_size 1000
+python baselineTagger.py --gpu --langs da/sv --tgt_size 1000
 ```
 
 To run the Neural Factor Graph Model, 
 
 ```
-python traincrf.py --gpu --langs sv/da --tgt_size 1000
+python traincrf.py --gpu --langs da/sv --tgt_size 1000
 
 ```
 
