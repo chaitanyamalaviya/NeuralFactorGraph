@@ -73,16 +73,19 @@ class DynamicCRF(nn.Module):
 			self.joint_tf2 = nn.Linear(self.uniqueTags.tagSetSize(), len(self.langs), bias=False)
 
 
-		# Matrix of transition parameters.  Entry i,j is the score of
-		# transitioning *to* i *from* j.
+
 		
 		self.pairs = list(itertools.combinations(range(self.uniqueTags.size()), 2))
 		self.lstm_weights = nn.ParameterList([nn.Parameter(torch.randn(t.size())) for t in self.uniqueTags])
 		
+		# Tensor of pairwise parameters.  Entry i,j in a matrix is the cooccurrence score of
+		# label i of tag1 *with* label j of tag2.
 		if not self.no_pairwise:
 			self.pairwise_weights = nn.ParameterList([nn.Parameter(torch.zeros(self.uniqueTags.getTagbyIdx(i).size(), self.uniqueTags.getTagbyIdx(j).size())) \
 												for i, j in self.pairs])
 
+		# Tensor of transition parameters.  Entry i,j in a matrix is the score of
+		# transitioning *from* i *to* j.
 		if not self.no_transitions:
 			self.transition_weights = nn.ParameterList([nn.Parameter(torch.zeros(t.size(), t.size())) for t in self.uniqueTags])
 		
@@ -105,7 +108,6 @@ class DynamicCRF(nn.Module):
 
 	def init_hidden(self):
 		# Before we've done anything, we dont have any hidden state.
-		# Refer to the Pytorch documentation to see exactly why they have this dimensionality.
 		# The axes semantics are (num_layers, minibatch_size, hidden_dim)
 		return (utils.get_var(torch.zeros(self.n_layers * 2, 1, self.hidden_dim), gpu=self.gpu),
 				utils.get_var(torch.zeros(self.n_layers * 2, 1, self.hidden_dim), gpu=self.gpu))
@@ -176,11 +178,6 @@ class DynamicCRF(nn.Module):
 	def belief_propogation_log(self, gold_tags, lang, sentLen, batch_lstm_feats, test=False):
 
 		# fwd messages, then bwd messages for each tag => ! O(n^2)
-		# Flexible for schedules => [random, fwd-bwd / synchronous)
-
-		# print([p.data for p in self.transition_weights])
-		# print([p.data for p in self.pairwise_weights])
-		# print([p.data for p in self.lstm_weights])
 
 		# start_time = time.time()
 
@@ -192,16 +189,12 @@ class DynamicCRF(nn.Module):
 
 		# Initialize factor graph, add vars and factors
 		print("Creating Factor Graph...")
-		# print("SentLen: %d" %sentLen)
 		graph = FactorGraph(sentLen, batch_size, self.gpu)
 
 		# Add variables to graph
 		for tag in self.uniqueTags:
 			for t in range(sentLen):
 				label=None
-				# gold_dict = utils.unfreeze_dict(gold_tags[t])
-				# if tag.name in gold_dict:
-				# 	label = gold_dict[tag.name]
 				graph.addVariable(tag, label, t)
 
 		if not self.no_pairwise:
@@ -658,7 +651,6 @@ class DynamicCRF(nn.Module):
 			all_factors.append((pairwise_factor_beliefs, pairwise_factor_scores))
 
 		all_factors.append((lstm_scores, targets))
-		# pdb.set_trace()
 
 		return all_factors
 
@@ -673,11 +665,6 @@ class DynamicCRF(nn.Module):
 			for tag in self.uniqueTags:
 				var = graph.getVarByTimestepnTag(t, tag.idx)
 				score = var.belief[batchIdx]
-				# if t!=graph.T-1 and t!=0:
-				# 	var2 = graph.getVarByTimestepnTag(t+1, tag.idx)
-				# 	trans_factor = graph.getFactorByVars(var, var2)
-				# 	prev_best_label = tag.label2idx[bestSequence[t-1][tag.name]]
-				# 	score = score + trans_factor.belief[batchIdx, prev_best_label]
 				val, ind = torch.max(score, 0)
 				sequence[tag.name] = tag.idx2label[ind.cpu().data[0]]
 			bestSequence.append(sequence)

@@ -113,8 +113,6 @@ if args.unit_test:
     no_tags, no_labels, no_timesteps = [int(arg) for arg in args.unit_test_args.strip().split(",")]
     training_data, train_tgt_labels = unit.create_sample_data(int(no_tags), [int(no_labels)]*int(no_tags), int(no_timesteps))
     # training_data, train_tgt_labels = unit.create_sample_data(int(no_tags), [2,3], int(no_timesteps))
-    print(train_tgt_labels)
-    print(training_data)
     training_data = [training_data]
 
 dev_data_langwise, dev_tgt_labels = utils.read_conll(args.treebank_path, [langs[-1]], code_to_lang, train_or_dev="dev")
@@ -170,7 +168,6 @@ for sent, _ in training_data:
 word_to_ix["UNK"] = len(word_to_ix)
 char_to_ix["UNK"] = len(char_to_ix)
 
-#@profile
 def main():
     if not os.path.isfile(args.model_name) or args.continue_train:
         if args.continue_train:
@@ -224,8 +221,6 @@ def main():
 
                 lang_ids = train_lang_ids[start_idx : end_idx + 1]
 
-                # print(sentence)
-                # print(morph)
                 sent += end_idx - start_idx + 1
                 tokens += sum([len(sentence) for sentence in train_sents])
                 batch_idx += 1
@@ -292,19 +287,12 @@ def main():
                 loss = tagger_model.compute_loss(all_factors_batch, loss_function)
                 # print("Loss:", loss)
 
-                # values, indices = torch.max(tag_scores, 1)
-                # out_tags = indices.cpu().data.numpy().flatten()
-                # correct += np.count_nonzero(out_tags==targets.cpu().data.numpy()) 
-                # targets = [utils.unfreeze_dict(tags) for tags in morph]
-                # correct += utils.getCorrectCount(targets, hypSeq)
-                
                 cum_loss += loss.cpu().data[0]
                 loss.backward()
                 # tagger_model.gradient_check(all_factors_batch[0])
                 optimizer.step()
 
             print("Loss: %f" % loss.cpu().data.numpy())
-            # print("Accuracy: %f" %(correct/tokens))
             print("Saving model..")
             torch.save(tagger_model, args.model_name)
             if (epoch+1)%4==0:
@@ -390,16 +378,8 @@ def eval_on_dev(tagger_model, curEpoch=None, dev_or_test="dev"):
         for k in range(len(eval_sents)):
             hypSeq = tagger_model.getBestSequence(graph, k)
             targets = [utils.unfreeze_dict(tags) for tags in morph_sents[k]]
-            #hypSeqTrimmed = []
-            #targets = []
-            #for i, tags in enumerate(morph_sents[k]):
-            #    if utils.removeNullLabels(tags) not in train_tgt_labels:
-            #        targets.append(utils.unfreeze_dict(tags))
-            #        hypSeqTrimmed.append(hypSeq[i])
-
             correct += utils.getCorrectCount(targets, hypSeq)
             toks += len(eval_sents[k])
-            #toks += len(targets)
             all_out_tags = np.append(all_out_tags, hypSeq)
             all_targets = np.append(all_targets, targets)
     avg_tok_accuracy = correct / toks
