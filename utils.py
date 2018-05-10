@@ -316,17 +316,6 @@ def logDot(a, b, redAxis=None):
 
   return C.transpose() if redAxis==1 else C
 
-  # assert a.shape[1]==b.shape[0], "Invalid input to logDot. %d != %d" % (a.shape[1], b.shape[0])
-  # res = np.zeros((a.shape[0], b.shape[1]))
-  # res[:] = -float('inf')
-
-  # for i in range(a.shape[0]):
-  #   for j in range(b.shape[1]):
-  #     for k in range(a.shape[1]):
-  #       res[i][j] = logSumExp(res[i][j], a[i][k]+b[k][j]) 
-
-  # return res if redAxis==None else np.squeeze(res, axis=redAxis)
-
 
 def logMax(a, b, redAxis=None):
 
@@ -346,17 +335,6 @@ def logMax(a, b, redAxis=None):
   C += max_a + max_b
 
   return C.transpose() if redAxis==1 else C
-
-  # assert a.shape[1]==b.shape[0], "Invalid input to logMax. %d != %d" % (a.shape[1], b.shape[0])
-  # res = np.zeros((a.shape[0], b.shape[1]))
-  # res[:] = -float('inf')
-
-  # for i in range(a.shape[0]):
-  #   for j in range(b.shape[1]):
-  #     for k in range(a.shape[1]):
-  #       res[i][j] = max(res[i][j], a[i][k]+b[k][j]) 
-
-  # return res if redAxis==None else np.squeeze(res, axis=redAxis)
 
 def logNormalize(a):
 

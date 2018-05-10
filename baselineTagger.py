@@ -260,8 +260,6 @@ def eval(tagger_model, curEpoch=None, dev_or_test="dev"):
         targets = targets.cpu().data.numpy()
         correct += np.count_nonzero(out_tags==targets)
         toks += len(sentence)
-        # all_out_tags = np.append(all_out_tags, out_tags)
-        # all_targets = np.append(all_targets, targets)
      
     avg_tok_accuracy = correct / toks
 
@@ -288,7 +286,6 @@ def eval(tagger_model, curEpoch=None, dev_or_test="dev"):
 
 
     f1_score, f1_micro_score = utils.computeF1(hypTags, finalTgts, prefix, labels_to_ix, baseline=True, write_results=True) 
-    #f1_score, f1_micro_score = utils.computeF1(all_out_tags, all_targets, prefix, labels_to_ix, baseline=True, write_results=True)
     print("Test Set Accuracy: %f" % avg_tok_accuracy)
     print("Test Set Avg F1 Score (Macro): %f" % f1_score)
     print("Test Set Avg F1 Score (Micro): %f" % f1_micro_score)
