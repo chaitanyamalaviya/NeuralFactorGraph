@@ -355,7 +355,7 @@ def eval_on_dev(tagger_model, curEpoch=None, dev_or_test="dev"):
     if args.model_type=="universal":
         lang_id = [langs[-1]]
 
-    for start_idx, end_idx in eval_order[:1]:
+    for start_idx, end_idx in eval_order:
 
         cur_eval_data = eval_data[start_idx : end_idx + 1]
         eval_sents = [elem[0] for elem in cur_eval_data]
