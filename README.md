@@ -42,5 +42,12 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 ## Citation
 
 ```
-TBA
+@inproceedings{malaviya18acl,
+    title = {Neural Factor Graph Models for Cross-lingual Morphological Tagging},
+    author = {Chaitanya Malaviya and Matthew R. Gormley and Graham Neubig},
+    booktitle = {The 56th Annual Meeting of the Association for Computational Linguistics (ACL)},
+    address = {Melbourne, Australia},
+    month = {July},
+    year = {2018}
+}
 ```
