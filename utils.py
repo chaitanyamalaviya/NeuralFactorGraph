@@ -2,6 +2,7 @@ from __future__ import division, print_function
 from conllu.parser import parse, parse_tree
 from tags import Tags, Tag, Label
 
+import os
 import re
 import math
 import numpy as np
@@ -76,9 +77,15 @@ def read_conll(treebank_path, langs, code_to_lang, train_or_dev, tgt_size=None, 
     train = train_or_dev if not test else "test"
 
     if not test:
-      filepath = treebank_path + "UD_" + code_to_lang[lang] + '/' + lang + "-ud-" + train + ".conllu"
+      for file in os.listdir(treebank_path):
+        if file.endswith("train.conllu"):
+          filepath = os.path.join(treebank_path, file)
+          break
     else:
-      filepath = treebank_path + "UD_" + code_to_lang[lang] + '/' + lang + "-ud-test.conllu"
+      for file in os.listdir(treebank_path):
+        if file.endswith("dev.conllu"):
+          filepath = os.path.join(treebank_path, file)
+          break
 
     with open(filepath) as f:
       data = f.readlines()[:-1]
@@ -362,8 +369,6 @@ def computeF1(hyps, golds, prefix, labels_to_ix=None, baseline=False, write_resu
   f1_recall_scores = {}
   f1_recall_total = {}
   f1_average = 0.0
-  hyps = []
-  golds = []
   
   if baseline:
     for i, tag in enumerate(golds):
@@ -382,12 +387,12 @@ def computeF1(hyps, golds, prefix, labels_to_ix=None, baseline=False, write_resu
         if v==golds[i][k]:
           f1_precision_scores[k] += 1
       f1_precision_total[k] += 1
-
+ 
   f1_micro_precision = sum(f1_precision_scores.values())/sum(f1_precision_total.values())
 
   for k in f1_precision_scores.keys():
     f1_precision_scores[k] = f1_precision_scores[k]/f1_precision_total[k]
-
+  
   # calculate recall
   for i, word_tags in enumerate(golds, start=0):
     for k, v in word_tags.items():
