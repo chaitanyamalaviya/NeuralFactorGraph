@@ -1,5 +1,9 @@
 # Neural Factor Graph Models for Cross-lingual Morphological Tagging
 
+<p align="center">
+ <img src="figures/nfg-model.png" width="500">
+</p>
+
 Morphological analysis involves predicting the syntactic traits of a word (e.g. {POS: Noun, Case: Acc, Gender: Fem}). Previous work in morphological tagging improves performance for low-resource languages (LRLs) through cross-lingual training with a high-resource language (HRL) from the same family, but is limited by the strict---often false---assumption that tag sets exactly overlap between the HRL and LRL. In this paper we propose a method for cross-lingual morphological tagging that aims to improve information sharing between languages by relaxing this assumption. The proposed model uses factorial conditional random fields with neural network potentials, making it possible to (1) utilize the expressive power of neural network representations to smooth over superficial differences in the surface forms, (2) model pairwise and transitive relationships between tags, and (3) accurately generate tag sets that are unseen or rare in the training data. Experiments on four languages from the Universal Dependencies Treebank demonstrate superior tagging accuracies over existing cross-lingual approaches.
 
 ### Prerequisites
@@ -38,5 +42,12 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 ## Citation
 
 ```
-TBA
+@inproceedings{malaviya18acl,
+    title = {Neural Factor Graph Models for Cross-lingual Morphological Tagging},
+    author = {Chaitanya Malaviya and Matthew R. Gormley and Graham Neubig},
+    booktitle = {The 56th Annual Meeting of the Association for Computational Linguistics (ACL)},
+    address = {Melbourne, Australia},
+    month = {July},
+    year = {2018}
+}
 ```
