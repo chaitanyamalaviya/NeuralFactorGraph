@@ -31,6 +31,8 @@ The transitions and pairwise factors can be turned off with the `--no_transition
 
 You can run evaluation with the argument `--test` and visualize the learnt parameter matrices with the `--visualize` argument.
 
+Please set the `--treebank_path` argument to the appropriate path to UD treebanks.
+
 ### Data
 
 The Universal Dependency Treebanks can be obtained from https://lindat.mff.cuni.cz/repository/xmlui/handle/11234/1-2515.
