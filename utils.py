@@ -77,14 +77,14 @@ def read_conll(treebank_path, langs, code_to_lang, train_or_dev, tgt_size=None, 
     train = train_or_dev if not test else "test"
 
     if not test:
-      for file in os.listdir(treebank_path):
+      for file in os.listdir(treebank_path + "UD_" + code_to_lang[lang]):
         if file.endswith("train.conllu"):
-          filepath = os.path.join(treebank_path, file)
+          filepath = os.path.join(treebank_path + "UD_" + code_to_lang[lang], file)
           break
     else:
-      for file in os.listdir(treebank_path):
+      for file in os.listdir(treebank_path + "UD_" + code_to_lang[lang]):
         if file.endswith("dev.conllu"):
-          filepath = os.path.join(treebank_path, file)
+          filepath = os.path.join(treebank_path+ "UD_" + code_to_lang[lang], file)
           break
 
     with open(filepath) as f:
