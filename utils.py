@@ -371,9 +371,8 @@ def computeF1(hyps, golds, prefix, labels_to_ix=None, baseline=False, write_resu
   f1_average = 0.0
   
   if baseline:
-    for i, tag in enumerate(golds):
-      hyps.append(unfreeze_dict(hyps[i]))
-      golds.append(unfreeze_dict(tag))
+    hyps = [unfreeze_dict(h) for h in hyps]
+    golds = [unfreeze_dict(t) for t in golds]
 
   # calculate precision
   for i, word_tags in enumerate(hyps, start=0):
