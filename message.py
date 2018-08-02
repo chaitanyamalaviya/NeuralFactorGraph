@@ -12,7 +12,7 @@ class FactorGraph:
 	"""
 	Class defining the Factor Graph
 	"""
-	
+
 	def __init__(self, T, batch_size, gpu=True):
 		self.vars = []
 		self.factors = []
@@ -103,7 +103,7 @@ class Factor:
 
 		if self.kind=="lstm":
 			self.belief = None
-		else:	
+		else:
 			self.belief = Variable(torch.zeros((batch_size, var1.tag.size(), var2.tag.size())), requires_grad=True)
 			if gpu:
 				self.belief = self.belief.cuda()
@@ -206,7 +206,7 @@ class Messages:
 class Message:
 	def __init__(self, frm, to, value):
 		"""
-		Message from variable to factor 
+		Message from variable to factor
 		or factor to variable
 
 		"""

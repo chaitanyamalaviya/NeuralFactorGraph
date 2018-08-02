@@ -98,6 +98,13 @@ class DynamicCRF(nn.Module):
 		if not self.no_tagset_factor:
 			self.tagset_weights = nn.ParameterList([nn.Parameter(Variable(torch.FloatTensor(self.tagset_tensor[i]), requires_grad = False)) for i, t in enumerate(self.uniqueTags)])
 
+			# Add tagset "tag"
+			self.uniqueTags.addTag("Set")
+			SetTag = self.uniqueTags.getTagbyName("Set")
+			for label in self.seen_tagsets:
+				SetTag.addLabel(str(utils.unfreeze_dict(label)))
+			SetTag.addLabel("UnseenSet")
+
 		if self.model_type=="specific":
 			self.lang_pairwise_weights = nn.ParameterList([nn.Parameter(torch.zeros(len(self.langs), self.uniqueTags.getTagbyIdx(i).size(), \
 														self.uniqueTags.getTagbyIdx(j).size())) for i, j in self.pairs])
@@ -218,15 +225,6 @@ class DynamicCRF(nn.Module):
 				label=None
 				graph.addVariable(tag, label, t)
 
-		if not self.no_tagset_factor:
-			# Add tagset variable
-			for t in range(sentLen):
-				# TODO: "None" won't work for tag argument
-				graph.addVariable(None, None, t)
-				var = graph.getVarByTimestepnTag(None, None)
-				graph.addFactor(kind, var, "TagSetVars")
-
-
 		if not self.no_pairwise:
 			# Add pairwise factors to graph
 			kind = "pair"
@@ -253,15 +251,17 @@ class DynamicCRF(nn.Module):
 			# Add transition factors to graph
 			kind = "trans"
 			for tag in self.uniqueTags:
-				for t in range(sentLen-1):
-					var1 = graph.getVarByTimestepnTag(t, tag.idx)
-					var2 = graph.getVarByTimestepnTag(t+1, tag.idx)
-					graph.addFactor(kind, var1, var2)
+				if tag.name!="Set":
+					for t in range(sentLen-1):
+						var1 = graph.getVarByTimestepnTag(t, tag.idx)
+						var2 = graph.getVarByTimestepnTag(t+1, tag.idx)
+						graph.addFactor(kind, var1, var2)
 
 
 			transition_weights_np = {}
 			for tag in self.uniqueTags:
-				transition_weights_np[tag.idx] = self.transition_weights[tag.idx].cpu().data.numpy()
+				if tag.name!="Set":
+					transition_weights_np[tag.idx] = self.transition_weights[tag.idx].cpu().data.numpy()
 
 			if self.model_type=="specific":
 				for tag in self.uniqueTags:
@@ -274,16 +274,15 @@ class DynamicCRF(nn.Module):
 				var = graph.getVarByTimestepnTag(t, tag.idx)
 				graph.addFactor(kind, var, "LSTMVar")
 
-		if not self.no_tagset_factor:
-			# Add tagset factors to graph
-			kind = "tagset"
-			for tag in self.uniqueTags:
-				for t in range(sentLen):
-					var1 = graph.getVarByTimestepnTag(t, None)
-					var2 = graph.getVarByTimestepnTag(t, tag.idx)
-					graph.addFactor(kind, var1, var2)
-
-
+		# if not self.no_tagset_factor:
+		# 	# Add tagset factors to graph
+		# 	kind = "tagset"
+		# 	NoneTag = self.uniqueTags.getTagbyName("None")
+		# 	for tag in self.uniqueTags:
+		# 		for t in range(sentLen):
+		# 			var1 = graph.getVarByTimestepnTag(t, NoneTag)
+		# 			var2 = graph.getVarByTimestepnTag(t, tag.idx)
+		# 			graph.addFactor(kind, var1, var2)
 
 		# Initialize messages
 		messages = Messages(graph, batch_size)
@@ -291,20 +290,34 @@ class DynamicCRF(nn.Module):
 		# Add LSTM unary factor message to each variable
 		for tag in self.uniqueTags:
 			for t in range(sentLen):
-				lstm_vecs = []
-				var = graph.getVarByTimestepnTag(t, tag.idx)
-				lstm_factor = graph.getFactorByVars(var, "LSTMVar")
-				cur_tag_lstm_weights = self.lstm_weights[tag.idx]
+				if tag.name!="Set":
+					lstm_vecs = []
+					var = graph.getVarByTimestepnTag(t, tag.idx)
+					lstm_factor = graph.getFactorByVars(var, "LSTMVar")
+					cur_tag_lstm_weights = self.lstm_weights[tag.idx]
 
-				for batchIdx in range(batch_size):
-					lstm_feats = batch_lstm_feats[batchIdx]
-					cur_lstm_feats = lstm_feats[t]
-					cur_tag_lstm_feats = cur_lstm_feats[self.tag_offsets[tag.name]: self.tag_offsets[tag.name]+tag.size()]
-					lstm_vec = torch.unsqueeze(cur_tag_lstm_weights + cur_tag_lstm_feats, 0)
-					lstm_vec = utils.logNormalizeTensor(lstm_vec).squeeze(dim=0)
-					lstm_vecs.append(lstm_vec.cpu().data.numpy())
+					for batchIdx in range(batch_size):
+						lstm_feats = batch_lstm_feats[batchIdx]
+						cur_lstm_feats = lstm_feats[t]
+						cur_tag_lstm_feats = cur_lstm_feats[self.tag_offsets[tag.name]: self.tag_offsets[tag.name]+tag.size()]
+						lstm_vec = torch.unsqueeze(cur_tag_lstm_weights + cur_tag_lstm_feats, 0)
+						lstm_vec = utils.logNormalizeTensor(lstm_vec).squeeze(dim=0)
+						lstm_vecs.append(lstm_vec.cpu().data.numpy())
 
-				messages.updateMessage(lstm_factor, var, np.array(lstm_vecs))
+					messages.updateMessage(lstm_factor, var, np.array(lstm_vecs))
+
+				else:
+					lstm_tagset_vecs = []
+					var = graph.getVarByTimestepnTag(t, tag.idx)
+					lstm_tagset_factor = graph.getFactorByVars(var, "LSTMVar")
+
+					for batchIdx in range(batch_size):
+						lstm_tagset_feats = batch_lstm_tagset_feats[batchIdx]
+						cur_lstm_tagset_feats = lstm_tagset_feats[t]
+						lstm_tagset_vec = utils.logNormalizeTensor(cur_lstm_tagset_feats)
+						lstm_tagset_vecs.append(lstm_tagset_vec.cpu().data.numpy())
+
+					messages.updateMessage(lstm_tagset_factor, var, np.array(lstm_tagset_vecs))
 
 
 		iter = 0
