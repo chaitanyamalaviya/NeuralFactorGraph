@@ -53,14 +53,14 @@ def get_lang_code_dicts():
     split_line = [line.split() for line in lines]
     for line in split_line[:-2]:
       lang = rgx.sub('', line[0])
-      code = rgx.sub('', line[2]) 
+      code = rgx.sub('', line[2])
       lang_to_code[lang] = code
     code_to_lang = {v: k for k, v in lang_to_code.iteritems()}
   return lang_to_code, code_to_lang
 
 
 def read_conll(treebank_path, langs, code_to_lang, train_or_dev, tgt_size=None, test=False):
-  
+
   """
    Reads conll formatted file
 
@@ -110,7 +110,7 @@ def read_conll(treebank_path, langs, code_to_lang, train_or_dev, tgt_size=None, 
               word_tags.update({'POS':word['upostag']})
             else:
               word_tags = {'POS':word['upostag']}
-          
+
           if word_tags:
             word_tags = freeze_dict(word_tags)
             if word_tags not in unique:
@@ -126,6 +126,56 @@ def read_conll(treebank_path, langs, code_to_lang, train_or_dev, tgt_size=None, 
 
   return annot_sents, unique
 
+
+def getTagSetTensor(tagsets, tags):
+
+    tagSetTensor = [np.zeros((len(tagsets)+1, t.size())) for t in tags]
+    for i, tagset in enumerate(tagsets):
+        tagset = unfreeze_dict(tagset)
+        for j, tag in enumerate(tags):
+            if tag.name in tagset:
+                val = tag.label2idx[tagset[tag.name]]
+                tagSetTensor[j][i][val] = 1
+
+    for j, tag in enumerate(tags):
+        tagSetTensor[j][len(tagsets)] = np.random.uniform(0, 1, tag.size())
+
+    return tagSetTensor
+
+def write_conll(treebank_path, hyps, sentCount):
+    filepath = None
+    for file in os.listdir(treebank_path):
+      if file.endswith("dev.conllu"):
+        filepath = os.path.join(treebank_path, file)
+        break
+
+    if filepath==None:
+        print("No test set provided!")
+
+    write_sents = []
+    sent = 0
+
+    with open(filepath) as f:
+        data = f.readlines()
+        i = 0
+        for line in data:
+            if sent==sentCount:
+                break
+
+            if line[0]=='#' or line.strip()=="":
+               write_sents.append(line)
+               if line.strip()=="":
+                   sent += 1
+            else:
+               line = line.split("\t")
+               hypString ="|".join([k+"="+v for k,v in hyps[i].items() if k!="POS" and v!="NULL"])
+               line[5] = hypString if hypString!="" else "_"
+               line[3] = hyps[i]["POS"]
+               write_sents.append("\t".join(line))
+               i += 1
+
+    with open(filepath + ".pred",'w') as f:
+        f.writelines(write_sents)
 
 def addNullLabels(annot_sents, langs, unique_tags):
 
@@ -179,14 +229,14 @@ def get_train_order(training_data, batch_size, startIdx=0):
   batch_counter = 0
 
   for i, length in enumerate(lengths, start=startIdx):
-    
+
     if length!=prev_length or batch_counter>batch_size:
       start_idxs.append(i)
       if prev_length!=-1:
         end_idxs.append(i-1)
       batch_counter = 1
 
-    batch_counter += 1 
+    batch_counter += 1
     prev_length = length
 
   end_idxs.append(startIdx + len(lengths)-1)
@@ -201,7 +251,7 @@ def find_unique_tags(train_data_tags, null_label=False):
     for tag, label in unfreeze_dict(tags).items():
       if not unique_tags.tagExists(tag):
         unique_tags.addTag(tag)
-        
+
       curTag = unique_tags.getTagbyName(tag)
 
       if not curTag.labelExists(label):
@@ -233,7 +283,7 @@ def plot_heatmap(uniqueTags, weights, kind):
         tag2 = uniqueTags.getTagbyIdx(j)
         tag1_labels = [label.name for label in tag1.labels]
         tag2_labels = [label.name for label in tag2.labels]
-        
+
         plt.figure(figsize=(20, 18), dpi=80)
         plt.xticks(range(0, len(tag2_labels)), tag2_labels)
         plt.yticks(range(0, len(tag1_labels)), tag1_labels)
@@ -243,7 +293,7 @@ def plot_heatmap(uniqueTags, weights, kind):
         plt.imshow(weight.data.cpu().numpy(), cmap='Reds', interpolation='nearest')
         plt.savefig("figures/" + tag1.name + "_" + tag2.name + ".png", bbox_inches='tight')
         plt.close()
-      
+
       elif kind=="trans":
         tag = uniqueTags.getTagbyIdx(k)
         tag_labels = [label.name for label in tag.labels]
@@ -369,7 +419,7 @@ def computeF1(hyps, golds, prefix, labels_to_ix=None, baseline=False, write_resu
   f1_recall_scores = {}
   f1_recall_total = {}
   f1_average = 0.0
-  
+
   if baseline:
     for i, tag in enumerate(golds):
       hyps.append(unfreeze_dict(hyps[i]))
@@ -387,12 +437,12 @@ def computeF1(hyps, golds, prefix, labels_to_ix=None, baseline=False, write_resu
         if v==golds[i][k]:
           f1_precision_scores[k] += 1
       f1_precision_total[k] += 1
- 
+
   f1_micro_precision = sum(f1_precision_scores.values())/sum(f1_precision_total.values())
 
   for k in f1_precision_scores.keys():
     f1_precision_scores[k] = f1_precision_scores[k]/f1_precision_total[k]
-  
+
   # calculate recall
   for i, word_tags in enumerate(golds, start=0):
     for k, v in word_tags.items():
@@ -411,7 +461,7 @@ def computeF1(hyps, golds, prefix, labels_to_ix=None, baseline=False, write_resu
   f1_scores = {}
   for k in f1_recall_scores.keys():
     f1_recall_scores[k] = f1_recall_scores[k]/f1_recall_total[k]
-    
+
     if f1_recall_scores[k]==0 or k not in f1_precision_scores:
       f1_scores[k] = 0
     else:

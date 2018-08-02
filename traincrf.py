@@ -18,8 +18,8 @@ import torch.optim as optim
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--treebank_path", type=str, 
-                    default="/projects/tir2/users/cmalaviy/ud_exp/ud-treebanks-v2.1/")
+parser.add_argument("--treebank_path", type=str,
+                    default="/projects/tir1/users/cmalaviy/conll18/release-2.2-st-train-dev-data/ud-treebanks-v2.2")
 parser.add_argument("--optim", type=str, default='adam', choices=["sgd","adam","adagrad"])
 parser.add_argument("--lr", type=float, default=0.1)
 parser.add_argument("--emb_dim", type=int, default=128)
@@ -31,7 +31,7 @@ parser.add_argument("--epochs", type=int, default=10)
 parser.add_argument("--batch_size", type=int, default=16)
 parser.add_argument("--langs", type=str, default="uk",
                     help="Languages separated by delimiter '/' with last language being target language")
-parser.add_argument("--tgt_size", type=int, default=None, 
+parser.add_argument("--tgt_size", type=int, default=None,
                     help="Number of training sentences for target language")
 parser.add_argument("--model_name", type=str, default="model_dcrf")
 parser.add_argument("--no_transitions", action='store_true')
@@ -76,14 +76,17 @@ if args.no_pairwise:
 
 # Get training data
 print("Loading training data...")
-training_data_langwise, train_tgt_labels = utils.read_conll(args.treebank_path, langs, code_to_lang, tgt_size=args.tgt_size, train_or_dev="train")
+training_data_langwise, unique_tagsets = utils.read_conll(args.treebank_path, langs, code_to_lang, tgt_size=args.tgt_size, train_or_dev="train")
 training_data = []
 train_lang_ids = []
-# labels_to_ix = train_tgt_labels
+# labels_to_ix = unique_tagsets
 
-unique_tags = utils.find_unique_tags(train_tgt_labels, null_label=True)
+unique_tags = utils.find_unique_tags(unique_tagsets, null_label=True)
 print("Number of unique tags: %d" % unique_tags.size())
 # unique_tags.printTags()
+
+if not args.no_tagset_factor:
+    tagset_tensor = utils.getTagSetTensor(unique_tagsets, unique_tags)
 
 # Oversample target language data
 if args.tgt_size==100 and args.model_type!="mono":
@@ -104,15 +107,15 @@ for l in langs:
     training_data += training_data_langwise[l]
     train_lang_ids += [l]*len(training_data_langwise[l])
     startIdx = len(training_data)
-    
+
 
 print("%d sentences in training set" %len(training_data))
 
 if args.unit_test:
     training_data = []
     no_tags, no_labels, no_timesteps = [int(arg) for arg in args.unit_test_args.strip().split(",")]
-    training_data, train_tgt_labels = unit.create_sample_data(int(no_tags), [int(no_labels)]*int(no_tags), int(no_timesteps))
-    # training_data, train_tgt_labels = unit.create_sample_data(int(no_tags), [2,3], int(no_timesteps))
+    training_data, unique_tagsets = unit.create_sample_data(int(no_tags), [int(no_labels)]*int(no_tags), int(no_timesteps))
+    # training_data, unique_tagsets = unit.create_sample_data(int(no_tags), [2,3], int(no_timesteps))
     training_data = [training_data]
 
 dev_data_langwise, dev_tgt_labels = utils.read_conll(args.treebank_path, [langs[-1]], code_to_lang, train_or_dev="dev")
@@ -131,7 +134,7 @@ if args.test:
     test_data_langwise = utils.addNullLabels(test_data_langwise, [test_lang], unique_tags)
     test_data = test_data_langwise[test_lang]
     test_data, test_lang_ids = utils.sortbylength(test_data, [langs[-1]]*len(test_data))
-    
+
 
 # Store starting index of each minibatch
 if args.batch_size != 1:
@@ -160,7 +163,7 @@ for sent, _ in training_data:
         if word_to_ix[word] not in word_freq:
             word_freq[word_to_ix[word]] = 1
         else:
-            word_freq[word_to_ix[word]] += 1 
+            word_freq[word_to_ix[word]] += 1
         for char in word:
             if char not in char_to_ix:
                 char_to_ix[char] = len(char_to_ix)
@@ -179,7 +182,7 @@ def main():
             print("Creating new model...")
             tagger_model = factorial_crf_tagger.DynamicCRF(args, word_freq, langs, len(char_to_ix), \
             										len(word_to_ix), unique_tags)
-            if args.gpu:	
+            if args.gpu:
                 tagger_model = tagger_model.cuda()
 
         if args.unit_test:
@@ -190,7 +193,7 @@ def main():
             tests.setUp(tagger_model, training_data[0][1], len(training_data[0][0]), lstm_feats)
 
         loss_function = nn.NLLLoss()
-        # Provide (N,C) log probability values as input 
+        # Provide (N,C) log probability values as input
         # loss_function = nn.CrossEntropyLoss()
 
         if args.optim=="sgd":
@@ -238,7 +241,7 @@ def main():
                             # , correct/tokens))
 
                 tagger_model.zero_grad()
-                
+
                 sents_in = []
 
                 for i, sentence in enumerate(train_sents):
@@ -277,7 +280,7 @@ def main():
                     print("Skipping parameter updates...")
                     continue
 
-                # Compute the loss, gradients, and update the parameters     
+                # Compute the loss, gradients, and update the parameters
                 all_factors_batch = []
 
                 for k in range(len(train_sents)):
@@ -342,13 +345,13 @@ def eval_on_dev(tagger_model, curEpoch=None, dev_or_test="dev"):
     lang_id = []
     if args.model_type=="universal":
         lang_id = [langs[-1]]
-
+    sentCount = 0
     for start_idx, end_idx in eval_order:
 
         cur_eval_data = eval_data[start_idx : end_idx + 1]
         eval_sents = [elem[0] for elem in cur_eval_data]
         morph_sents = [elem[1] for elem in cur_eval_data]
-
+        sentCount += len(eval_sents)
 
         sents_in = []
 
@@ -382,6 +385,7 @@ def eval_on_dev(tagger_model, curEpoch=None, dev_or_test="dev"):
             toks += len(eval_sents[k])
             all_out_tags = np.append(all_out_tags, hypSeq)
             all_targets = np.append(all_targets, targets)
+
     avg_tok_accuracy = correct / toks
 
     prefix = args.model_name
@@ -394,13 +398,13 @@ def eval_on_dev(tagger_model, curEpoch=None, dev_or_test="dev"):
         prefix += "_" + str(args.tgt_size)
 
     write = True if dev_or_test=="test" else False
-
     f1_score, f1_micro_score = utils.computeF1(all_out_tags, all_targets, prefix, write_results=write)
     print("Test Set Accuracy: %f" % avg_tok_accuracy)
     print("Test Set Avg F1 Score (Macro): %f" % f1_score)
     print("Test Set Avg F1 Score (Micro): %f" % f1_micro_score)
 
     if write:
+        utils.write_conll(args.treebank_path, all_out_tags, sentCount)
         with open(prefix + '_results_f1.txt', 'ab') as file:
             file.write("\nAccuracy: " + str(avg_tok_accuracy) + "\n")
             for target, hyp in zip(all_targets, all_out_tags):
@@ -421,7 +425,7 @@ def eval_on_dev(tagger_model, curEpoch=None, dev_or_test="dev"):
 #     lang_id = []
 #     if args.model_type=="universal":
 #         lang_id = [lang]
-    
+
 #     for sentence, morph in test_data:
 #         tagger_model.zero_grad()
 #         tagger_model.char_hidden = tagger_model.init_hidden()
@@ -459,7 +463,7 @@ def eval_on_dev(tagger_model, curEpoch=None, dev_or_test="dev"):
 #     if args.sum_word_char:
 #         prefix = "wc-sum-hf_" + prefix
 
-#     prefix += "-".join([l for l in langs]) + "_test" 
+#     prefix += "-".join([l for l in langs]) + "_test"
 
 #     if args.sent_attn:
 #         prefix += "sent_attn"

@@ -1,16 +1,16 @@
 import os
+import sys
 
 #langs = ['da/sv', 'sv/da', 'bg/ru', 'ru/bg', 'es/pt', 'pt/es']
-langs = ['da/sv', 'ru/bg','fi/hu','es/pt']
-langs = ['sv', 'bg', 'hu', 'pt']
-with open("run_gpu.sh") as f:
+with open("scripts/run_gpu.sh") as f:
   data = f.readlines()
 
-pyscript = "python -u traincrf.py --langs language --batch_size 64 --model_type specific --model_name null_model_dcrf_specific_sum --gpu"
+lang = str(sys.argv[2])
 
-for lang in langs:
-  wdata = data + [pyscript.replace("language", lang)]
-  script_name = "scripts/run_tagger_" + lang.replace("/","-") + "_cross_ling_dcrf_specificsum.sh"
-  with open(script_name, 'w') as f:
-    f.writelines(wdata)
-  os.system("sbatch -J " + lang + "specific_cross_ling " + script_name)
+pyscript = "python -u traincrf.py --treebank_path " + str(sys.argv[1]) + " --langs " + str(sys.argv[2]) + " --batch_size 64 --model_type specific --model_name nfg_model --gpu --test"
+
+wdata = data + [pyscript.replace("language", lang)]
+script_name = "scripts/run_tagger_" + lang.replace("/","-") + "_mono_nfg_test.sh"
+with open(script_name, 'w') as f:
+  f.writelines(wdata)
+os.system("sbatch -J " + lang + "-mono-test " + script_name)

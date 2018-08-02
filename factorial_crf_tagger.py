@@ -20,7 +20,7 @@ import torch.optim as optim
 
 
 class DynamicCRF(nn.Module):
-	def __init__(self, args, word_freq, langs, char_vocab_size, word_vocab_size, uniqueTags):
+	def __init__(self, args, word_freq, langs, char_vocab_size, word_vocab_size, uniqueTags, seen_tagsets, tagset_tensor=None):
 
 		super(DynamicCRF, self).__init__()
 
@@ -31,8 +31,11 @@ class DynamicCRF(nn.Module):
 		self.char_vocab_size = char_vocab_size
 		self.word_vocab_size = word_vocab_size
 		self.uniqueTags = uniqueTags
+		self.seen_tagsets = seen_tagsets
+		self.tagset_tensor = tagset_tensor
 		self.no_transitions = args.no_transitions
 		self.no_pairwise = args.no_pairwise
+		self.no_tagset_factor = args.no_tagset_factor
 
 		self.n_layers = args.n_layers
 		self.sum_word_char = args.sum_word_char
@@ -45,7 +48,7 @@ class DynamicCRF(nn.Module):
 		# CharLSTM
 		self.char_embeddings = nn.Embedding(self.char_vocab_size, self.embedding_dim)
 		self.char_lstm = nn.LSTM(self.embedding_dim, self.hidden_dim, num_layers=self.n_layers, dropout=self.dropout, bidirectional=True)
-		# The linear layer that maps from hidden state space to 
+		# The linear layer that maps from hidden state space to
 		# self.proj1 = nn.Linear(2 * self.hidden_dim, self.mlp_size)
 		# self.proj2 = nn.Linear(self.mlp_size, self.char_vocab_size)
 		self.char_hidden = self.init_hidden()
@@ -58,14 +61,19 @@ class DynamicCRF(nn.Module):
 			self.proj2 = nn.Linear(self.mlp_size, 1, bias=False)
 
 		self.lstm = nn.LSTM(self.hidden_dim*2, self.hidden_dim, num_layers=self.n_layers, dropout=self.dropout, bidirectional=True)
-		
+
 		# The linear layer that maps from hidden state space to tag space
 		if self.model_type=="mono" or self.model_type=="baseline":
 			self.hidden2tag = nn.Linear(2 * self.hidden_dim, self.uniqueTags.tagSetSize())
+			if not self.no_tagset_factor:
+				self.hidden2tagset = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets))
 
 		elif self.model_type=="specific" or self.model_type=="joint":
 			self.hidden2tag_1 = nn.Linear(2 * self.hidden_dim, self.uniqueTags.tagSetSize())
 			self.hidden2tag_2 = nn.Linear(2 * self.hidden_dim, self.uniqueTags.tagSetSize())
+			if not self.no_tagset_factor:
+				self.hidden2tagset_1 = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets))
+				self.hidden2tagset_2 = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets))
 
 		# Lang ID model
 		if self.model_type=="joint":
@@ -73,11 +81,9 @@ class DynamicCRF(nn.Module):
 			self.joint_tf2 = nn.Linear(self.uniqueTags.tagSetSize(), len(self.langs), bias=False)
 
 
-
-		
 		self.pairs = list(itertools.combinations(range(self.uniqueTags.size()), 2))
 		self.lstm_weights = nn.ParameterList([nn.Parameter(torch.randn(t.size())) for t in self.uniqueTags])
-		
+
 		# Tensor of pairwise parameters.  Entry i,j in a matrix is the cooccurrence score of
 		# label i of tag1 *with* label j of tag2.
 		if not self.no_pairwise:
@@ -88,14 +94,17 @@ class DynamicCRF(nn.Module):
 		# transitioning *from* i *to* j.
 		if not self.no_transitions:
 			self.transition_weights = nn.ParameterList([nn.Parameter(torch.zeros(t.size(), t.size())) for t in self.uniqueTags])
-		
+
+		if not self.no_tagset_factor:
+			self.tagset_weights = nn.ParameterList([nn.Parameter(Variable(torch.FloatTensor(self.tagset_tensor[i]), requires_grad = False)) for i, t in enumerate(self.uniqueTags)])
+
 		if self.model_type=="specific":
 			self.lang_pairwise_weights = nn.ParameterList([nn.Parameter(torch.zeros(len(self.langs), self.uniqueTags.getTagbyIdx(i).size(), \
 														self.uniqueTags.getTagbyIdx(j).size())) for i, j in self.pairs])
 			self.lang_transition_weights = nn.ParameterList([nn.Parameter(torch.zeros(len(self.langs), t.size(), t.size())) \
 																	for t in self.uniqueTags])
 
-		
+
 		# calculate tag offsets for lstm features
 		tag_count = 0
 		self.tag_offsets = {}
@@ -111,7 +120,7 @@ class DynamicCRF(nn.Module):
 		# The axes semantics are (num_layers, minibatch_size, hidden_dim)
 		return (utils.get_var(torch.zeros(self.n_layers * 2, 1, self.hidden_dim), gpu=self.gpu),
 				utils.get_var(torch.zeros(self.n_layers * 2, 1, self.hidden_dim), gpu=self.gpu))
-		
+
 
 	def get_lstm_features(self, words, word_idxs=None, lang=None, test=False):
 		"""
@@ -139,20 +148,30 @@ class DynamicCRF(nn.Module):
 
 		lstm_out, self.hidden = self.lstm(char_embs, self.hidden)
 
+		tagset_space = None
+
 		if self.model_type=="specific" and lang:
 			# tag_space = self.hidden2tag[lang](lstm_out.view(char_embs.size(0), -1))
 			if self.langs.index(lang)==0:
 				tag_space = self.hidden2tag_1(lstm_out.view(char_embs.size(0), -1))
+				if not self.no_tagset_factor:
+					tagset_space = self.hidden2tagset_1(lstm_out.view(char_embs.size(0), -1))
 			else:
 				tag_space = self.hidden2tag_2(lstm_out.view(char_embs.size(0), -1))
+				if not self.no_tagset_factor:
+					tagset_space = self.hidden2tagset_2(lstm_out.view(char_embs.size(0), -1))
 
 		elif self.model_type=="joint" and lang:
 			tf1 = F.tanh(self.joint_tf1(lstm_out.view(char_embs.size(0), -1)))
 			tf2 = F.log_softmax(self.joint_tf2(tf1))
 			if self.langs.index(lang)==0:
 				tag_space = self.hidden2tag_1(lstm_out.view(char_embs.size(0), -1))
+				if not self.no_tagset_factor:
+					tagset_space = self.hidden2tagset_1(lstm_out.view(char_embs.size(0), -1))
 			else:
 				tag_space = self.hidden2tag_2(lstm_out.view(char_embs.size(0), -1))
+				if not self.no_tagset_factor:
+					tagset_space = self.hidden2tagset_2(lstm_out.view(char_embs.size(0), -1))
 
 		elif self.model_type=="joint" and test:
 			tf1 = F.tanh(self.joint_tf1(lstm_out.view(char_embs.size(0), -1)))
@@ -165,6 +184,8 @@ class DynamicCRF(nn.Module):
 
 		else:
 			tag_space = self.hidden2tag(lstm_out.view(char_embs.size(0), -1))
+			if not self.no_tagset_factor:
+				tagset_space = self.hidden2tagset(lstm_out.view(char_embs.size(0), -1))
 
 		# tag_scores = F.log_softmax(tag_space)
 		if self.model_type=="joint" and not test:
@@ -172,10 +193,10 @@ class DynamicCRF(nn.Module):
 		elif self.model_type=="joint" and test:
 			tag_scores = tag_scores + pred_lang_scores.repeat(1, self.uniqueTags.tagSetSize())
 
-		return tag_space
+		return tag_space, tagset_space
 
 	# @profile
-	def belief_propogation_log(self, gold_tags, lang, sentLen, batch_lstm_feats, test=False):
+	def belief_propogation_log(self, gold_tags, lang, sentLen, batch_lstm_feats, batch_lstm_tagset_feats, test=False):
 
 		# fwd messages, then bwd messages for each tag => ! O(n^2)
 
@@ -196,6 +217,15 @@ class DynamicCRF(nn.Module):
 			for t in range(sentLen):
 				label=None
 				graph.addVariable(tag, label, t)
+
+		if not self.no_tagset_factor:
+			# Add tagset variable
+			for t in range(sentLen):
+				# TODO: "None" won't work for tag argument
+				graph.addVariable(None, None, t)
+				var = graph.getVarByTimestepnTag(None, None)
+				graph.addFactor(kind, var, "TagSetVars")
+
 
 		if not self.no_pairwise:
 			# Add pairwise factors to graph
@@ -231,7 +261,7 @@ class DynamicCRF(nn.Module):
 
 			transition_weights_np = {}
 			for tag in self.uniqueTags:
-				transition_weights_np[tag.idx] = self.transition_weights[tag.idx].cpu().data.numpy() 
+				transition_weights_np[tag.idx] = self.transition_weights[tag.idx].cpu().data.numpy()
 
 			if self.model_type=="specific":
 				for tag in self.uniqueTags:
@@ -243,7 +273,18 @@ class DynamicCRF(nn.Module):
 			for t in range(sentLen):
 				var = graph.getVarByTimestepnTag(t, tag.idx)
 				graph.addFactor(kind, var, "LSTMVar")
-		
+
+		if not self.no_tagset_factor:
+			# Add tagset factors to graph
+			kind = "tagset"
+			for tag in self.uniqueTags:
+				for t in range(sentLen):
+					var1 = graph.getVarByTimestepnTag(t, None)
+					var2 = graph.getVarByTimestepnTag(t, tag.idx)
+					graph.addFactor(kind, var1, var2)
+
+
+
 		# Initialize messages
 		messages = Messages(graph, batch_size)
 
@@ -264,15 +305,15 @@ class DynamicCRF(nn.Module):
 					lstm_vecs.append(lstm_vec.cpu().data.numpy())
 
 				messages.updateMessage(lstm_factor, var, np.array(lstm_vecs))
-				
-		
+
+
 		iter = 0
 		while iter<maxIters:
 			print("[BP iteration %d]" %iter, end=" ")
 			maxVal = [-float("inf")]*batch_size
 			for tag in self.uniqueTags:
 				var_list = graph.getVarsByTag(tag.idx)
-				
+
 				# FORWARD
 
 				for t in range(sentLen):
@@ -280,7 +321,7 @@ class DynamicCRF(nn.Module):
 					var = var_list[t]
 
 					# Get pairwise potentials
-					
+
 					factor_list = graph.getFactorByVars(var)
 					factor_sum = np.zeros((batch_size, var.tag.size()))
 
@@ -315,7 +356,7 @@ class DynamicCRF(nn.Module):
 							cur_pairwise_weights = pairwise_weights_np[pairwise_idx]
 
 							if transpose:
-								
+
 								pairwise_pot = utils.logDot(cur_pairwise_weights, messages.getMessage(var2, factor).value, redAxis=1)
 							else:
 								pairwise_pot = utils.logDot(messages.getMessage(var2, factor).value, cur_pairwise_weights, redAxis=0)
@@ -359,11 +400,11 @@ class DynamicCRF(nn.Module):
 							messages.updateMessage(trans_factor, var2, transition_pot)
 
 				# BACKWARD
-				if not self.no_transitions:		
+				if not self.no_transitions:
 
 					for t in range(sentLen-1, 0, -1):
 
-						var = var_list[t]						
+						var = var_list[t]
 						factor_list = graph.getFactorByVars(var)
 
 						# Variable2Factor Message
@@ -372,7 +413,7 @@ class DynamicCRF(nn.Module):
 						trans_factor = graph.getFactorByVars(var, var2)
 
 						message = np.zeros((batch_size, var.tag.size()))
-						
+
 						for i, factor_mult in enumerate(factor_list):
 							if factor_mult!=trans_factor:
 								message += messages.getMessage(factor_mult, var).value
@@ -411,7 +452,7 @@ class DynamicCRF(nn.Module):
 					if self.gpu:
 						factorMsg = factorMsg.cuda()
 					var.belief = var.belief + factorMsg
-					
+
 				# Normalize
 				var.belief = utils.logNormalizeTensor(var.belief)
 
@@ -481,7 +522,7 @@ class DynamicCRF(nn.Module):
 					var2 = graph.getVarByTimestepnTag(t+1, tag_idx)
 					next_label_idx = self.uniqueTags.getTagbyIdx(tag_idx).label2idx[next_tags_dict[tag]]
 					num += graph.getFactorByVars(var1, var2).belief[cur_label_idx][next_label_idx]
-					
+
 				# pairwise factors
 				for coocc_tag in cur_tags[i:]:
 					if tag!=coocc_tag:
@@ -512,7 +553,7 @@ class DynamicCRF(nn.Module):
 					factor = graph.getFactorByVars(var1, var2)
 					if factor.var1.tag.name==tag:
 						num += factor.belief[cur_label_idx][coocc_label_idx]
-					else: 
+					else:
 						num += factor.belief[coocc_label_idx][cur_label_idx]
 
 		return (num-denom)
@@ -536,7 +577,7 @@ class DynamicCRF(nn.Module):
 		lstm_scores = {}
 
 		# get variable scores
-		
+
 		for tag in self.uniqueTags:
 			var_list = graph.getVarsByTag(tag.idx)
 			targets[tag.name] = []
@@ -577,7 +618,7 @@ class DynamicCRF(nn.Module):
 		pairwise_factor_beliefs = {}
 
 		for t, tags in enumerate(gold_tags, start=0):
-			
+
 			tags_dict = utils.unfreeze_dict(tags)
 			cur_tags = tags_dict.keys()
 
@@ -599,7 +640,7 @@ class DynamicCRF(nn.Module):
 							coocc_tag_idx = self.uniqueTags.tag2idx[coocc_tag]
 							var2 = graph.getVarByTimestepnTag(t, coocc_tag_idx)
 							coocc_label_idx = self.uniqueTags.getTagbyIdx(coocc_tag_idx).label2idx[tags_dict[coocc_tag]]
-							
+
 							if var2.tag.idx < var1.tag.idx:
 								pairwise_idx = self.pairs.index((var2.tag.idx, var1.tag.idx))
 								gold_belief = coocc_label_idx * var1.tag.size() + cur_label_idx
@@ -612,7 +653,7 @@ class DynamicCRF(nn.Module):
 							if pairwise_idx not in pairwise_factor_scores:
 								pairwise_factor_scores[pairwise_idx] = []
 								pairwise_factor_beliefs[pairwise_idx] = []
-							
+
 							pairwise_factor_scores[pairwise_idx].append(gold_belief)
 							pairwise_factor_beliefs[pairwise_idx].append(target_belief)
 
@@ -620,7 +661,7 @@ class DynamicCRF(nn.Module):
 				if not self.no_transitions:
 
 					# Collect transition scores
-					
+
 					if t!=len(gold_tags)-1:
 
 						# tagExists = False
@@ -636,17 +677,17 @@ class DynamicCRF(nn.Module):
 							trans_factor_scores[tag].append(gold_belief)
 							trans_factor_beliefs[tag].append(target_belief)
 							# tagExists = True
-							
+
 						# if not tagExists:
 						# 	del trans_factor_scores[tag]
 						# 	del trans_factor_beliefs[tag]
 
 
 		all_factors = []
-		
+
 		if not self.no_transitions:
 			all_factors.append((trans_factor_beliefs, trans_factor_scores))
-		
+
 		if not self.no_pairwise:
 			all_factors.append((pairwise_factor_beliefs, pairwise_factor_scores))
 
@@ -696,12 +737,15 @@ class DynamicCRF(nn.Module):
 	def forward(self, sents, gold_tags, word_idxs=None, langs=None, test=False):
 
 		lstm_feat_sents = []
+		lstm_tagset_feat_sents = []
 		for i, sent in enumerate(sents):
 			lang = langs[i] if langs!=None else None
 			widx = word_idxs[i] if word_idxs!=None else None
-			lstm_feat_sents.append(self.get_lstm_features(sent, widx, lang, test))
+			lstm_feats, lstm_tagset_feats = self.get_lstm_features(sent, widx, lang, test)
+			lstm_feat_sents.append(lstm_feats)
+			lstm_tagset_feat_sents.append(lstm_tagset_feats)
 
-		graph, maxVal = self.belief_propogation_log(gold_tags, lang, len(lstm_feat_sents[0]), lstm_feat_sents, test=test)
+		graph, maxVal = self.belief_propogation_log(gold_tags, lang, len(lstm_feat_sents[0]), lstm_feat_sents, lstm_tagset_feat_sents, test=test)
 		#graph, maxVal = bp.belief_propogation_log(self, lang, len(lstm_feat_sents[0]), lstm_feat_sents, test=test)
 		return lstm_feat_sents, graph, maxVal
 
@@ -745,6 +789,4 @@ class DynamicCRF(nn.Module):
 		pdb.set_trace()
 		# Assert numerical gradients and computed gradients are equal
 
-		return None	
-
-
+		return None
