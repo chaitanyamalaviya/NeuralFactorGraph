@@ -7,10 +7,10 @@ with open("scripts/run_gpu.sh") as f:
 
 lang = str(sys.argv[2])
 
-pyscript = "python -u traincrf.py --treebank_path " + str(sys.argv[1]) + " --langs " + str(sys.argv[2]) + " --batch_size 64 --model_type specific --model_name nfg_model --gpu --test"
+pyscript = "python -u traincrf.py --treebank_path " + str(sys.argv[1]) + " --langs " + str(sys.argv[2]) + " --batch_size 64 --model_type specific --model_name nfg_model --gpu"
 
 wdata = data + [pyscript.replace("language", lang)]
-script_name = "scripts/run_tagger_" + lang.replace("/","-") + "_mono_nfg_test.sh"
+script_name = "scripts/run_tagger_" + lang.replace("/","-") + "_mono_nfg.sh"
 with open(script_name, 'w') as f:
   f.writelines(wdata)
-os.system("sbatch -J " + lang + "-mono-test " + script_name)
+os.system("sbatch -J " + lang + "-mono " + script_name)

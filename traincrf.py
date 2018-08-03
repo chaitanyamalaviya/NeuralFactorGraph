@@ -36,6 +36,7 @@ parser.add_argument("--tgt_size", type=int, default=None,
 parser.add_argument("--model_name", type=str, default="model_dcrf")
 parser.add_argument("--no_transitions", action='store_true')
 parser.add_argument("--no_pairwise", action='store_true')
+parser.add_argument("--no_tagset_factor", action='store_true')
 parser.add_argument("--continue_train", action='store_true')
 parser.add_argument("--model_type", type=str, default="baseline", choices=["universal","joint","mono","specific","baseline"])
 parser.add_argument("--sum_word_char", action='store_true')
@@ -72,6 +73,8 @@ if args.no_transitions:
     args.model_name += "-no_transitions"
 if args.no_pairwise:
     args.model_name += "-no_pairwise"
+if not args.no_tagset_factor:
+    args.model_name += "-tagset_factor"
 
 
 # Get training data
@@ -93,7 +96,7 @@ if args.tgt_size==100 and args.model_type!="mono":
     training_data_langwise[langs[-1]] = training_data_langwise[langs[-1]] * 10
 
 # Add null labels to tag sets in training data
-training_data_langwise = utils.addNullLabels(training_data_langwise, langs, unique_tags)
+training_data_langwise, unique_tagsets = utils.addNullLabels(training_data_langwise, langs, unique_tags)
 
 
 # Create batches for training
@@ -120,7 +123,7 @@ if args.unit_test:
 
 dev_data_langwise, dev_tgt_labels = utils.read_conll(args.treebank_path, [langs[-1]], code_to_lang, train_or_dev="dev")
 # Add null labels to tag sets in dev data
-dev_data_langwise = utils.addNullLabels(dev_data_langwise, [langs[-1]], unique_tags)
+dev_data_langwise, _  = utils.addNullLabels(dev_data_langwise, [langs[-1]], unique_tags)
 dev_data = dev_data_langwise[langs[-1]]
 dev_lang_ids = [langs[-1]]*len(dev_data)
 
@@ -131,7 +134,7 @@ dev_data, dev_lang_ids = utils.sortbylength(dev_data, dev_lang_ids)
 if args.test:
     test_lang = langs[-1]
     test_data_langwise, test_tgt_labels = utils.read_conll(args.treebank_path, [test_lang], code_to_lang, train_or_dev="test", test=True)
-    test_data_langwise = utils.addNullLabels(test_data_langwise, [test_lang], unique_tags)
+    test_data_langwise, _ = utils.addNullLabels(test_data_langwise, [test_lang], unique_tags)
     test_data = test_data_langwise[test_lang]
     test_data, test_lang_ids = utils.sortbylength(test_data, [langs[-1]]*len(test_data))
 
@@ -181,7 +184,7 @@ def main():
         else:
             print("Creating new model...")
             tagger_model = factorial_crf_tagger.DynamicCRF(args, word_freq, langs, len(char_to_ix), \
-            										len(word_to_ix), unique_tags)
+            										len(word_to_ix), unique_tags, unique_tagsets, tagset_tensor)
             if args.gpu:
                 tagger_model = tagger_model.cuda()
 
@@ -271,9 +274,9 @@ def main():
                     all_word_seq = None
 
                 if args.model_type=="specific" or args.model_type=="joint":
-                    lstm_feat_sents, graph, maxVal = tagger_model(sents_in, morph_sents, word_idxs=all_word_seq, langs=lang_ids)
+                    lstm_feat_sents, graph, maxVal, lstm_tagset_feat_sents = tagger_model(sents_in, morph_sents, word_idxs=all_word_seq, langs=lang_ids)
                 else:
-                    lstm_feat_sents, graph, maxVal = tagger_model(sents_in, morph_sents, word_idxs=all_word_seq)
+                    lstm_feat_sents, graph, maxVal, lstm_tagset_feat_sents = tagger_model(sents_in, morph_sents, word_idxs=all_word_seq)
 
                 # Skip parameter updates if marginals are not within a threshold
                 if maxVal > 10.00:
@@ -287,7 +290,7 @@ def main():
                     all_factors = tagger_model.get_scores(graph, morph_sents[k], lstm_feat_sents[k], k)
                     all_factors_batch.append(all_factors)
 
-                loss = tagger_model.compute_loss(all_factors_batch, loss_function)
+                loss = tagger_model.compute_loss(all_factors_batch, loss_function, lstm_tagset_feat_sents, morph_sents)
                 # print("Loss:", loss)
 
                 cum_loss += loss.cpu().data[0]

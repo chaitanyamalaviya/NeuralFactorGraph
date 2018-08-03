@@ -140,6 +140,8 @@ def getTagSetTensor(tagsets, tags):
     for j, tag in enumerate(tags):
         tagSetTensor[j][len(tagsets)] = np.random.uniform(0, 1, tag.size())
 
+    tagSetTensor = [np.transpose(mat) for mat in tagSetTensor]
+
     return tagSetTensor
 
 def write_conll(treebank_path, hyps, sentCount):
@@ -179,6 +181,8 @@ def write_conll(treebank_path, hyps, sentCount):
 
 def addNullLabels(annot_sents, langs, unique_tags):
 
+  seen_tagsets = []
+
   for lang in langs:
     i = 0
     for w, m in annot_sents[lang]:
@@ -188,13 +192,25 @@ def addNullLabels(annot_sents, langs, unique_tags):
         for tag in unique_tags:
           if tag.name not in tag_dict:
             tag_dict[tag.name] = "NULL"
-        new_tags.append(freeze_dict(tag_dict))
+        tag_dict = freeze_dict(tag_dict)
+        new_tags.append(tag_dict)
+        if tag_dict not in seen_tagsets:
+            seen_tagsets.append(tag_dict)
 
       annot_sents[lang][i] = (w, new_tags)
       i += 1
 
-  return annot_sents
+  return annot_sents, seen_tagsets
 
+
+def removeNullLabels(tagset):
+
+  newDict = {}
+  for t, v in unfreeze_dict(tagset).iteritems():
+      if v!='NULL':
+          newDict[t] = v
+
+  return freeze_dict(newDict)
 
 def sortbylength(data, lang_ids, maxlen=500):
   """

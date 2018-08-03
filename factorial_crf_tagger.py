@@ -66,20 +66,27 @@ class DynamicCRF(nn.Module):
 		if self.model_type=="mono" or self.model_type=="baseline":
 			self.hidden2tag = nn.Linear(2 * self.hidden_dim, self.uniqueTags.tagSetSize())
 			if not self.no_tagset_factor:
-				self.hidden2tagset = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets))
+				self.hidden2tagset = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets)+1)
 
 		elif self.model_type=="specific" or self.model_type=="joint":
 			self.hidden2tag_1 = nn.Linear(2 * self.hidden_dim, self.uniqueTags.tagSetSize())
 			self.hidden2tag_2 = nn.Linear(2 * self.hidden_dim, self.uniqueTags.tagSetSize())
 			if not self.no_tagset_factor:
-				self.hidden2tagset_1 = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets))
-				self.hidden2tagset_2 = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets))
+				self.hidden2tagset_1 = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets)+1)
+				self.hidden2tagset_2 = nn.Linear(2 * self.hidden_dim, len(self.seen_tagsets)+1)
 
 		# Lang ID model
 		if self.model_type=="joint":
 			self.joint_tf1 = nn.Linear(2 * self.hidden_dim, self.uniqueTags.tagSetSize(), bias=False)
 			self.joint_tf2 = nn.Linear(self.uniqueTags.tagSetSize(), len(self.langs), bias=False)
 
+		if not self.no_tagset_factor:
+			# Add "Set" tag
+			self.uniqueTags.addTag("Set")
+			SetTag = self.uniqueTags.getTagbyName("Set")
+			for label in self.seen_tagsets:
+				SetTag.addLabel(str(utils.unfreeze_dict(label)))
+			SetTag.addLabel("UnseenSet")
 
 		self.pairs = list(itertools.combinations(range(self.uniqueTags.size()), 2))
 		self.lstm_weights = nn.ParameterList([nn.Parameter(torch.randn(t.size())) for t in self.uniqueTags])
@@ -96,14 +103,14 @@ class DynamicCRF(nn.Module):
 			self.transition_weights = nn.ParameterList([nn.Parameter(torch.zeros(t.size(), t.size())) for t in self.uniqueTags])
 
 		if not self.no_tagset_factor:
-			self.tagset_weights = nn.ParameterList([nn.Parameter(Variable(torch.FloatTensor(self.tagset_tensor[i]), requires_grad = False)) for i, t in enumerate(self.uniqueTags)])
+			# self.tagset_weights = nn.ParameterList([nn.Parameter(Variable(torch.FloatTensor(self.tagset_tensor[i]), requires_grad = False).data) for i, t in enumerate(self.uniqueTags[:-1])])
+			i = 0
+			for t  in self.uniqueTags:
+				if t.name!="Set":
+					pairwise_idx = self.pairs.index((i, self.uniqueTags.size()-1))
+					self.pairwise_weights[pairwise_idx] = nn.Parameter(Variable(torch.FloatTensor(self.tagset_tensor[i]), requires_grad = False).data)
+				i += 1
 
-			# Add tagset "tag"
-			self.uniqueTags.addTag("Set")
-			SetTag = self.uniqueTags.getTagbyName("Set")
-			for label in self.seen_tagsets:
-				SetTag.addLabel(str(utils.unfreeze_dict(label)))
-			SetTag.addLabel("UnseenSet")
 
 		if self.model_type=="specific":
 			self.lang_pairwise_weights = nn.ParameterList([nn.Parameter(torch.zeros(len(self.langs), self.uniqueTags.getTagbyIdx(i).size(), \
@@ -250,6 +257,7 @@ class DynamicCRF(nn.Module):
 		if not self.no_transitions:
 			# Add transition factors to graph
 			kind = "trans"
+			transition_weights_np = {}
 			for tag in self.uniqueTags:
 				if tag.name!="Set":
 					for t in range(sentLen-1):
@@ -257,15 +265,18 @@ class DynamicCRF(nn.Module):
 						var2 = graph.getVarByTimestepnTag(t+1, tag.idx)
 						graph.addFactor(kind, var1, var2)
 
-
-			transition_weights_np = {}
-			for tag in self.uniqueTags:
-				if tag.name!="Set":
 					transition_weights_np[tag.idx] = self.transition_weights[tag.idx].cpu().data.numpy()
+
+
+
+			# for tag in self.uniqueTags:
+			# 	if tag.name!="Set":
+			# 		transition_weights_np[tag.idx] = self.transition_weights[tag.idx].cpu().data.numpy()
 
 			if self.model_type=="specific":
 				for tag in self.uniqueTags:
-					transition_weights_np[tag.idx] = utils.logSumExp(transition_weights_np[tag.idx], self.lang_transition_weights[tag.idx][langIdx].cpu().data.numpy())
+					if tag.name!="Set":
+						transition_weights_np[tag.idx] = utils.logSumExp(transition_weights_np[tag.idx], self.lang_transition_weights[tag.idx][langIdx].cpu().data.numpy())
 
 
 		kind = "lstm"
@@ -380,7 +391,7 @@ class DynamicCRF(nn.Module):
 							messages.updateMessage(factor, var, pairwise_pot)
 							factor_sum += pairwise_pot - curVal
 
-					if not self.no_transitions:
+					if not self.no_transitions and tag.name!="Set":
 
 						cur_tag_weights = transition_weights_np[tag.idx]
 
@@ -413,7 +424,7 @@ class DynamicCRF(nn.Module):
 							messages.updateMessage(trans_factor, var2, transition_pot)
 
 				# BACKWARD
-				if not self.no_transitions:
+				if not self.no_transitions and tag.name!="Set":
 
 					for t in range(sentLen-1, 0, -1):
 
@@ -592,35 +603,36 @@ class DynamicCRF(nn.Module):
 		# get variable scores
 
 		for tag in self.uniqueTags:
-			var_list = graph.getVarsByTag(tag.idx)
-			targets[tag.name] = []
-			tag_scores[tag.name] = []
-			lstm_scores[tag.name] = []
-			tagExists = False
-			for t in range(graph.T):
-				cur_lstm_feats = lstm_feats[t]
-				cur_tag_lstm_feats = cur_lstm_feats[self.tag_offsets[tag.name]: self.tag_offsets[tag.name]+tag.size()]
-				cur_tag_lstm_weights = self.lstm_weights[tag.idx]
-				lstm_score = cur_tag_lstm_weights + cur_tag_lstm_feats
-				# Normalize LSTM features
-				lstm_score = torch.unsqueeze(lstm_score, 0)
-				lstm_score = utils.logNormalizeTensor(lstm_score).squeeze(dim=0)
-				var = var_list[t]
+			if tag.name!="Set":
+				var_list = graph.getVarsByTag(tag.idx)
+				targets[tag.name] = []
+				tag_scores[tag.name] = []
+				lstm_scores[tag.name] = []
+				tagExists = False
+				for t in range(graph.T):
+					cur_lstm_feats = lstm_feats[t]
+					cur_tag_lstm_feats = cur_lstm_feats[self.tag_offsets[tag.name]: self.tag_offsets[tag.name]+tag.size()]
+					cur_tag_lstm_weights = self.lstm_weights[tag.idx]
+					lstm_score = cur_tag_lstm_weights + cur_tag_lstm_feats
+					# Normalize LSTM features
+					lstm_score = torch.unsqueeze(lstm_score, 0)
+					lstm_score = utils.logNormalizeTensor(lstm_score).squeeze(dim=0)
+					var = var_list[t]
 
-				if var.label!=None:
-					labelIdx = tag.label2idx[var.label]
-					targets[tag.name].append(labelIdx)
-					tag_scores[tag.name].append(var.belief[batchIdx])
-					lstm_scores[tag.name].append(lstm_score)
-					tagExists = True
-			if tagExists:
-				tag_scores[tag.name] = torch.stack(tag_scores[tag.name])
-				lstm_scores[tag.name] = torch.stack(lstm_scores[tag.name])
-				# targets[tag.name] = torch.stack(targets[tag.name]).squeeze(1)
-			else:
-				del tag_scores[tag.name]
-				del targets[tag.name]
-				del lstm_scores[tag.name]
+					if var.label!=None:
+						labelIdx = tag.label2idx[var.label]
+						targets[tag.name].append(labelIdx)
+						tag_scores[tag.name].append(var.belief[batchIdx])
+						lstm_scores[tag.name].append(lstm_score)
+						tagExists = True
+				if tagExists:
+					tag_scores[tag.name] = torch.stack(tag_scores[tag.name])
+					lstm_scores[tag.name] = torch.stack(lstm_scores[tag.name])
+					# targets[tag.name] = torch.stack(targets[tag.name]).squeeze(1)
+				else:
+					del tag_scores[tag.name]
+					del targets[tag.name]
+					del lstm_scores[tag.name]
 
 		# get factor scores
 
@@ -726,7 +738,7 @@ class DynamicCRF(nn.Module):
 		return bestSequence
 
 	# @profile
-	def compute_loss(self, all_factors_batch, loss_function):
+	def compute_loss(self, all_factors_batch, loss_function, batch_lstm_tagset_scores=None, targets=None):
 
 		loss = utils.get_var(torch.FloatTensor([0.0]), self.gpu)
 		# factor_kinds = [transition_factors, pairwise_factors, lstm_factors]
@@ -745,6 +757,21 @@ class DynamicCRF(nn.Module):
 							score = score.cuda()
 						loss += loss_function(belief, score)
 
+		if not self.no_tagset_factor:
+			# Add tagset loss
+			target_idxs = []
+			for i, tagsets in enumerate(targets):
+				batch_idxs = []
+				for j, tagset in enumerate(tagsets):
+					batch_idxs.append(self.seen_tagsets.index(tagset))
+				target_idxs.append(Variable(torch.LongTensor(batch_idxs), requires_grad=False))
+
+			batch_lstm_tagset_scores = torch.stack(batch_lstm_tagset_scores).view(-1, len(self.seen_tagsets) + 1)
+			target_idxs = torch.stack(target_idxs).view(-1)
+			if self.gpu:
+				target_idxs = target_idxs.cuda()
+			loss += loss_function(batch_lstm_tagset_scores, target_idxs)
+
 		return loss
 
 	def forward(self, sents, gold_tags, word_idxs=None, langs=None, test=False):
@@ -760,7 +787,7 @@ class DynamicCRF(nn.Module):
 
 		graph, maxVal = self.belief_propogation_log(gold_tags, lang, len(lstm_feat_sents[0]), lstm_feat_sents, lstm_tagset_feat_sents, test=test)
 		#graph, maxVal = bp.belief_propogation_log(self, lang, len(lstm_feat_sents[0]), lstm_feat_sents, test=test)
-		return lstm_feat_sents, graph, maxVal
+		return lstm_feat_sents, graph, maxVal, lstm_tagset_feat_sents
 
 	def gradient_check(self, all_factors):
 
